@@ -1,19 +1,26 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
+
 import "./AssetToken.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
-contract TokenizedAssetManagement {
-    address public owner;
+contract TokenizedAssetManagement is OwnableUpgradeable {
+    // address public owner;
     AggregatorV3Interface internal priceFeed;
+    // Hardcoded Chainlink ETH/USD price feed address
+    address constant priceFeedAddress =
+        0x694AA1769357215DE4FAC081bf1f309aDC325306;
 
     struct Asset {
+        address creator;
         address tokenAddress;
         string uri;
-        uint256 priceUSD;
+        uint256 priceUSD; // Price of the asset in USD per token
     }
 
-    mapping(address => Asset[]) public assets; // Map from the creator's address to an array of assets
+    mapping(address => Asset) public assets; // Map token address to asset details
+
     event AssetCreated(
         address indexed creator,
         address indexed tokenAddress,
@@ -26,15 +33,17 @@ contract TokenizedAssetManagement {
         uint256 amount
     );
 
-    constructor(address priceFeedAddress) {
-        owner = msg.sender;
-        priceFeed = AggregatorV3Interface(priceFeedAddress); // Chainlink ETH/USD price feed
+    function initialize(address initialOwner) public initializer {
+        __Ownable_init(initialOwner);
+        priceFeed = AggregatorV3Interface(
+            0x694AA1769357215DE4FAC081bf1f309aDC325306
+        );
     }
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Only the owner can call this function");
-        _;
-    }
+    // constructor() {
+    //     // owner = msg.sender;
+    //     priceFeed = AggregatorV3Interface(priceFeedAddress); // Chainlink ETH/USD price feed
+    // }
 
     function createAsset(
         string memory name,
@@ -42,14 +51,27 @@ contract TokenizedAssetManagement {
         uint256 totalSupply,
         uint256 priceUSD,
         string memory uri
-    ) external onlyOwner {
+    ) external {
+        // Create a new token
         AssetToken token = new AssetToken(
             name,
             symbol,
             totalSupply,
-            msg.sender
+            address(this)
         );
-        assets[msg.sender].push(Asset(address(token), uri, priceUSD)); // Store multiple assets per creator
+
+        // Grant this contract the MINTER_ROLE to enable minting tokens
+        //token.grantRole(token.MINTER_ROLE(), address(this));
+
+        // Record the new asset in the management contract
+        assets[address(token)] = Asset(
+            msg.sender,
+            address(token),
+            uri,
+            priceUSD
+        );
+
+        // Emit an event indicating creation of the asset
         emit AssetCreated(msg.sender, address(token), uri, priceUSD);
     }
 
@@ -59,38 +81,25 @@ contract TokenizedAssetManagement {
     }
 
     function buyAsset(address tokenAddress) external payable {
-        Asset[] memory userAssets = assets[msg.sender];
-        bool assetExists = false;
-        Asset memory asset;
+        Asset memory asset = assets[tokenAddress];
+        require(asset.tokenAddress != address(0), "Asset does not exist");
 
-        // Find the asset corresponding to the token address
-        for (uint256 i = 0; i < userAssets.length; i++) {
-            if (userAssets[i].tokenAddress == tokenAddress) {
-                asset = userAssets[i];
-                assetExists = true;
-                break;
-            }
-        }
-
-        require(assetExists, "Asset does not exist for the user");
-
-        int256 ethUSDPrice = getLatestPrice(); // Get the current ETH/USD price
+        int256 ethUSDPrice = 3100; // getLatestPrice(); // Get the current ETH/USD price
         require(ethUSDPrice > 0, "Invalid ETH/USD price");
 
-        // Calculate the equivalent USD value of `msg.value`
         uint256 ethInUSD = (msg.value * uint256(ethUSDPrice)) / 1e8; // Chainlink price feeds have 8 decimals
         require(ethInUSD > 0, "Insufficient payment");
 
-        // Calculate the number of tokens to transfer
         uint256 tokensToTransfer = (ethInUSD * 1e18) / asset.priceUSD; // 1e18 to adjust for decimal places
 
         AssetToken token = AssetToken(tokenAddress);
         require(
-            token.balanceOf(address(this)) >= tokensToTransfer,
-            "Not enough tokens available"
+            token.totalMinted() + tokensToTransfer <= token.maxSupply(),
+            "Max supply exceeded"
         );
 
-        token.transfer(msg.sender, tokensToTransfer);
+        // Mint tokens directly to the buyer's address
+        token.mint(msg.sender, tokensToTransfer);
 
         emit AssetBought(msg.sender, tokenAddress, tokensToTransfer);
     }
