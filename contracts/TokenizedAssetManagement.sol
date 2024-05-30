@@ -5,8 +5,7 @@ import "./AssetToken.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
-contract TokenizedAssetManagement is Initializable, OwnableUpgradeable {
-    string public version;
+contract TokenizedAssetManagement is OwnableUpgradeable {
     // address public owner;
     AggregatorV3Interface internal priceFeed;
     // Hardcoded Chainlink ETH/USD price feed address
@@ -39,7 +38,6 @@ contract TokenizedAssetManagement is Initializable, OwnableUpgradeable {
         priceFeed = AggregatorV3Interface(
             0x694AA1769357215DE4FAC081bf1f309aDC325306
         );
-        version = "v2"; // Move the version assignment here
     }
 
     // constructor() {
